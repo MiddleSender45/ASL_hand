@@ -1,0 +1,155 @@
+#include <Servo.h>
+
+// pointer
+Servo pq12_1;
+float pq1, voltage1;
+float pq1Min, pq1Max;
+
+// ring
+Servo pq12_2;
+float pq2, voltage2;
+float pq2Min, pq2Max;
+
+// middle
+Servo pq12_3;
+float pq3, voltage3;
+float pq3Min, pq3Max;
+
+// pinky
+Servo pq12_4;
+float pq4, voltage4;
+float pq4Min, pq4Max;
+
+// servo constraints
+const int SERVO_MIN_US = 1000;
+const int SERVO_MAX_US = 2000;
+
+//button states
+const int btn12 = 12;
+const int btn13 = 13;
+
+const float ADC_TO_V = 5.0 / 1023.0;
+
+//Calibration function
+void calibratePQInputs() {
+  pq1Min = 5.0;
+  pq1Max = 0.0;
+
+  pq2Min = 5.0;
+  pq2Max = 0.0;
+
+  pq3Min = 5.0;
+  pq3Max = 0.0;
+
+  pq4Min = 5.0;
+  pq4Max = 0.0;
+
+  unsigned long startTime = millis();
+  while (millis() - startTime < 10000) {
+    voltage1 = analogRead(A1) * ADC_TO_V;
+    voltage2 = analogRead(A3) * ADC_TO_V;
+    voltage3 = analogRead(A2) * ADC_TO_V;
+    voltage4 = analogRead(A4) * ADC_TO_V;
+
+    if (voltage1 < pq1Min) pq1Min = voltage1;
+    if (voltage1 > pq1Max) pq1Max = voltage1;
+
+    if (voltage2 < pq2Min) pq2Min = voltage2;
+    if (voltage2 > pq2Max) pq2Max = voltage2;
+
+    if (voltage3 < pq3Min) pq3Min = voltage3;
+    if (voltage3 > pq3Max) pq3Max = voltage3;
+
+    if (voltage4 < pq4Min) pq4Min = voltage4;
+    if (voltage4 > pq4Max) pq4Max = voltage4;
+
+    delay(10);
+  }
+
+// calibrated maxes and mins
+  Serial.println("Calibration done");
+  Serial.print("pq1 min/max: "); Serial.print(pq1Min); Serial.print(" / "); Serial.println(pq1Max);
+  Serial.print("pq2 min/max: "); Serial.print(pq2Min); Serial.print(" / "); Serial.println(pq2Max);
+  Serial.print("pq3 min/max: "); Serial.print(pq3Min); Serial.print(" / "); Serial.println(pq3Max);
+  Serial.print("pq4 min/max: "); Serial.print(pq4Min); Serial.print(" / "); Serial.println(pq4Max);
+}
+
+float readVoltage(int pin) {
+  return analogRead(pin) * (5.0 / 1023.0);
+}
+
+int mapVoltageToPulse(float v, float vMin, float vMax) {
+  v = constrain(v, vMin, vMax);
+  return map((long)(v * 1000), (long)(vMin * 1000), (long)(vMax * 1000), SERVO_MIN_US, SERVO_MAX_US);
+}
+
+void updateServosFromInputs() {
+  float v1 = readVoltage(A1);
+  float v2 = readVoltage(A3);
+  float v3 = readVoltage(A2);
+  float v4 = readVoltage(A4);
+
+  int p1 = mapVoltageToPulse(v1, pq1Min, pq1Max);
+  int p2 = mapVoltageToPulse(v2, pq2Min, pq2Max);
+  int p3 = mapVoltageToPulse(v3, pq3Min, pq3Max);
+  int p4 = mapVoltageToPulse(v4, pq4Min, pq4Max);
+
+  pq12_1.writeMicroseconds(p1);
+  pq12_2.writeMicroseconds(p2);
+  pq12_3.writeMicroseconds(p3);
+  pq12_4.writeMicroseconds(p4);
+}
+
+// teleoperation readings
+void printPQInputs() {
+  pq1 = analogRead(A1);
+  voltage1 = pq1 * ADC_TO_V;
+
+  pq2 = analogRead(A3);
+  voltage2 = pq2 * ADC_TO_V;
+
+  pq3 = analogRead(A2);
+  voltage3 = pq3 * ADC_TO_V;
+
+  pq4 = analogRead(A4);
+  voltage4 = pq4 * ADC_TO_V;
+
+  Serial.print("pq1: "); Serial.print(voltage1);
+  Serial.print("  pq2: "); Serial.print(voltage2);
+  Serial.print("  pq3: "); Serial.print(voltage3);
+  Serial.print("  pq4: "); Serial.println(voltage4);
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(btn12, INPUT_PULLUP);
+  pinMode(btn13, INPUT_PULLUP);
+  
+  pq12_1.attach(3);
+  pq12_2.attach(5);
+  pq12_3.attach(10);
+  pq12_4.attach(6);
+
+  pq12_1.writeMicroseconds(1500);
+  pq12_2.writeMicroseconds(1500);
+  pq12_3.writeMicroseconds(1500);
+  pq12_4.writeMicroseconds(1500);
+
+  calibratePQInputs();
+}
+
+void loop() {
+  if (digitalRead(btn12) == LOW) {
+    Serial.println("Position recorded");
+
+  }
+  
+  if (digitalRead(btn13) == LOW) {
+    Serial.println("Position cleared");
+  }
+  
+  updateServosFromInputs();
+  delay(20);
+
+}
