@@ -10,6 +10,10 @@ This repository contains the software and hardware control infrastructure requir
 
 [sign-language-interpreter repository](https://github.com/MiddleSender45/sign-language-interpreter.git?utm_source=chatgpt.com)
 
+
+<img width="3213" height="5712" alt="IMG_9224 (1)" src="https://github.com/user-attachments/assets/0376661b-2455-4627-8e88-a6f768659e68" />
+
+
 ---
 
 ## Features
@@ -120,10 +124,6 @@ Communication accessibility remains an underexplored area of artificial intellig
 This project is open-source to encourage collaboration, experimentation, and further development of accessible human-AI interfaces.
 
 ---
-
-
-<img width="3213" height="5712" alt="IMG_9224 (1)" src="https://github.com/user-attachments/assets/0376661b-2455-4627-8e88-a6f768659e68" />
-
 
 ## License
 
