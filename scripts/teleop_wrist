@@ -1,0 +1,477 @@
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
+#include <math.h>
+
+// ================= PCA9685 =================
+
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
+
+const int SERVO1_CH = 3;   // pointer
+const int SERVO2_CH = 1;   // ring
+const int SERVO3_CH = 2;   // middle
+const int SERVO4_CH = 0;   // pinky
+
+// servo constraints
+const int SERVO_MIN_US = 1000;
+const int SERVO_MAX_US = 2000;
+
+// ================= sensors =================
+
+// pointer
+float pq1, voltage1;
+float pq1Min, pq1Max;
+
+// ring
+float pq2, voltage2;
+float pq2Min, pq2Max;
+
+// middle
+float pq3, voltage3;
+float pq3Min, pq3Max;
+
+// pinky
+float pq4, voltage4;
+float pq4Min, pq4Max;
+
+// ================= buttons =================
+
+const int btn12 = 12;   // record (single click) / replay (double click) / delete (long press)
+const int btn13 = 13;   // toggles wrist stepper direction
+const float ADC_TO_V = 5.0 / 1023.0;
+
+// ================= wrist stepper (KY-023 + stepper driver) =================
+
+const int STEP_PIN = 4;
+const int DIR_PIN  = 3;
+const int EN_PIN   = 2;   // active LOW enable
+const int SW_PIN   = 9;   // KY-023 joystick button (SW), INPUT_PULLUP, active LOW
+
+const unsigned long STEP_DELAY_US = 1500; // constant wrist speed
+
+bool wristDirectionReversed = false; // toggled by btn13
+unsigned long lastWristStepTime = 0;
+long wristPosition = 0; // signed step count, tracked during teleop, recorded/replayed like the servos
+
+// =====================================================
+// Recording
+// =====================================================
+
+struct PositionRecord {
+  int pulse1;
+  int pulse2;
+  int pulse3;
+  int pulse4;
+  long stepperPosition;
+};
+
+PositionRecord storedRecord;
+bool hasStoredRecord = false;
+
+// button state + timing
+bool lastBtn12Reading = HIGH;
+bool lastBtn13Reading = HIGH;
+
+unsigned long btn12PressTime = 0;
+const unsigned long longPressThreshold = 800; // ms, hold -> delete
+
+// double-click detection for btn12
+bool btn12WaitingForSecondClick = false;
+unsigned long btn12FirstClickTime = 0;
+const unsigned long doubleClickWindow = 350; // ms window to catch the 2nd click
+bool btn12LongPressHandled = false;
+
+// playback state
+bool playbackActive = false;
+const unsigned long playbackHoldTime = 2500; // ms
+
+// =====================================================
+// Utility functions
+// =====================================================
+
+float readVoltage(int pin) {
+  return analogRead(pin) * ADC_TO_V;
+}
+
+int mapVoltageToPulse(float v, float vMin, float vMax) {
+
+  // guard against bad calibration
+  if (fabs(vMax - vMin) < 0.01) {
+    return 1500;
+  }
+
+  v = constrain(v, vMin, vMax);
+
+  long v_int    = (long)(v * 1000);
+  long vMin_int = (long)(vMin * 1000);
+  long vMax_int = (long)(vMax * 1000);
+
+  return map(v_int,
+             vMin_int,
+             vMax_int,
+             SERVO_MIN_US,
+             SERVO_MAX_US);
+}
+
+// =====================================================
+// PCA9685 servo output
+// =====================================================
+
+void writeServoUS(uint8_t channel, int microseconds) {
+
+  microseconds = constrain(
+      microseconds,
+      SERVO_MIN_US,
+      SERVO_MAX_US);
+
+  // 50 Hz = 20,000 us period
+  uint16_t ticks = (uint32_t)microseconds * 4096UL / 20000UL;
+
+  pwm.setPWM(channel, 0, ticks);
+}
+
+// =====================================================
+// Calibration
+// =====================================================
+
+void calibratePQInputs() {
+
+  pq1Min = 5.0;
+  pq1Max = 0.0;
+
+  pq2Min = 5.0;
+  pq2Max = 0.0;
+
+  pq3Min = 5.0;
+  pq3Max = 0.0;
+
+  pq4Min = 5.0;
+  pq4Max = 0.0;
+
+  Serial.println("Calibrating for 10 seconds...");
+
+  unsigned long startTime = millis();
+
+  while (millis() - startTime < 10000) {
+
+    float v1 = readVoltage(A1);
+    float v2 = readVoltage(A3);
+    float v3 = readVoltage(A2);
+    float v4 = readVoltage(A0);
+
+    if (v1 < pq1Min) pq1Min = v1;
+    if (v1 > pq1Max) pq1Max = v1;
+
+    if (v2 < pq2Min) pq2Min = v2;
+    if (v2 > pq2Max) pq2Max = v2;
+
+    if (v3 < pq3Min) pq3Min = v3;
+    if (v3 > pq3Max) pq3Max = v3;
+
+    if (v4 < pq4Min) pq4Min = v4;
+    if (v4 > pq4Max) pq4Max = v4;
+
+    delay(10);
+  }
+
+  Serial.println("Calibration done");
+
+  Serial.print("pq1 min/max: ");
+  Serial.print(pq1Min);
+  Serial.print(" / ");
+  Serial.println(pq1Max);
+
+  Serial.print("pq2 min/max: ");
+  Serial.print(pq2Min);
+  Serial.print(" / ");
+  Serial.println(pq2Max);
+
+  Serial.print("pq3 min/max: ");
+  Serial.print(pq3Min);
+  Serial.print(" / ");
+  Serial.println(pq3Max);
+
+  Serial.print("pq4 min/max: ");
+  Serial.print(pq4Min);
+  Serial.print(" / ");
+  Serial.println(pq4Max);
+}
+
+// =====================================================
+// Servo control
+// =====================================================
+
+void updateServosFromInputs() {
+
+  float v1 = readVoltage(A1);
+  float v2 = readVoltage(A3);
+  float v3 = readVoltage(A2);
+  float v4 = readVoltage(A0);
+
+  int p1 = mapVoltageToPulse(v1, pq1Min, pq1Max);
+  int p2 = mapVoltageToPulse(v2, pq2Min, pq2Max);
+  int p3 = mapVoltageToPulse(v3, pq3Min, pq3Max);
+  int p4 = mapVoltageToPulse(v4, pq4Min, pq4Max);
+
+  writeServoUS(SERVO1_CH, p1);
+  writeServoUS(SERVO2_CH, p2);
+  writeServoUS(SERVO3_CH, p3);
+  writeServoUS(SERVO4_CH, p4);
+}
+
+// =====================================================
+// Recording
+// =====================================================
+
+void captureCurrentServoState(PositionRecord &record) {
+
+  float v1 = readVoltage(A1);
+  float v2 = readVoltage(A3);
+  float v3 = readVoltage(A2);
+  float v4 = readVoltage(A0);
+
+  record.pulse1 = mapVoltageToPulse(v1, pq1Min, pq1Max);
+  record.pulse2 = mapVoltageToPulse(v2, pq2Min, pq2Max);
+  record.pulse3 = mapVoltageToPulse(v3, pq3Min, pq3Max);
+  record.pulse4 = mapVoltageToPulse(v4, pq4Min, pq4Max);
+  record.stepperPosition = wristPosition;
+}
+
+void recordCurrentPosition() {
+
+  captureCurrentServoState(storedRecord);
+  hasStoredRecord = true;
+
+  Serial.println("Position recorded:");
+
+  Serial.print("p1: ");
+  Serial.print(storedRecord.pulse1);
+
+  Serial.print("  p2: ");
+  Serial.print(storedRecord.pulse2);
+
+  Serial.print("  p3: ");
+  Serial.print(storedRecord.pulse3);
+
+  Serial.print("  p4: ");
+  Serial.println(storedRecord.pulse4);
+
+  Serial.print("  wrist steps: ");
+  Serial.println(storedRecord.stepperPosition);
+}
+
+void deleteStoredPosition() {
+
+  hasStoredRecord = false;
+  Serial.println("Stored position deleted");
+}
+
+// =====================================================
+// Playback
+// =====================================================
+
+void playbackStoredPosition() {
+
+  if (!hasStoredRecord) {
+    Serial.println("No stored position to playback");
+    return;
+  }
+
+  Serial.println("Playback stored position:");
+
+  Serial.print("p1: ");
+  Serial.print(storedRecord.pulse1);
+
+  Serial.print("  p2: ");
+  Serial.print(storedRecord.pulse2);
+
+  Serial.print("  p3: ");
+  Serial.print(storedRecord.pulse3);
+
+  Serial.print("  p4: ");
+  Serial.println(storedRecord.pulse4);
+
+  Serial.print("  wrist steps: ");
+  Serial.println(storedRecord.stepperPosition);
+
+  writeServoUS(SERVO1_CH, storedRecord.pulse1);
+  writeServoUS(SERVO2_CH, storedRecord.pulse2);
+  writeServoUS(SERVO3_CH, storedRecord.pulse3);
+  writeServoUS(SERVO4_CH, storedRecord.pulse4);
+
+  driveWristToPosition(storedRecord.stepperPosition);
+
+  playbackActive = true;
+}
+
+// =====================================================
+// Wrist stepper (KY-023 SW held = move, btn13 = flip direction)
+// =====================================================
+
+void updateWristStepper() {
+
+  bool swHeld = (digitalRead(SW_PIN) == LOW);
+
+  if (!swHeld) {
+    digitalWrite(EN_PIN, HIGH); // disable driver
+    digitalWrite(STEP_PIN, LOW);
+    return;
+  }
+
+  digitalWrite(EN_PIN, LOW); // enable driver
+
+  // base direction is arbitrary (CW); btn13 flips it
+  bool goForward = !wristDirectionReversed;
+  digitalWrite(DIR_PIN, goForward ? HIGH : LOW);
+
+  unsigned long nowMicros = micros();
+  if ((unsigned long)(nowMicros - lastWristStepTime) >= STEP_DELAY_US) {
+    lastWristStepTime = nowMicros;
+
+    digitalWrite(STEP_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(STEP_PIN, LOW);
+
+    wristPosition += goForward ? 1 : -1;
+  }
+}
+
+// =====================================================
+// Blocking move used by playback: walks the wrist stepper
+// from its current position to a target step count.
+// Deliberately blocking, same as the finger playback -
+// this IS the wrist's playback motion, not a side effect.
+// =====================================================
+
+void driveWristToPosition(long targetPosition) {
+
+  long stepsNeeded = targetPosition - wristPosition;
+
+  if (stepsNeeded == 0) {
+    return;
+  }
+
+  bool goForward = stepsNeeded > 0;
+  long stepsToTake = labs(stepsNeeded);
+
+  digitalWrite(EN_PIN, LOW); // enable driver for the move
+  digitalWrite(DIR_PIN, goForward ? HIGH : LOW);
+
+  for (long i = 0; i < stepsToTake; i++) {
+    digitalWrite(STEP_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(STEP_PIN, LOW);
+    delayMicroseconds(STEP_DELAY_US);
+
+    wristPosition += goForward ? 1 : -1;
+  }
+
+  digitalWrite(EN_PIN, HIGH); // disable until SW is held again for teleop
+}
+
+// =====================================================
+// Setup
+// =====================================================
+
+void setup() {
+
+  Serial.begin(9600);
+
+  pinMode(btn12, INPUT_PULLUP);
+  pinMode(btn13, INPUT_PULLUP);
+
+  pinMode(STEP_PIN, OUTPUT);
+  pinMode(DIR_PIN, OUTPUT);
+  pinMode(EN_PIN, OUTPUT);
+  pinMode(SW_PIN, INPUT_PULLUP);
+
+  digitalWrite(EN_PIN, HIGH); // start disabled
+  digitalWrite(STEP_PIN, LOW);
+
+  Wire.begin();          // A4 = SDA, A5 = SCL
+
+  pwm.begin();
+  pwm.setPWMFreq(50);    // standard servo frequency
+
+  delay(100);
+
+  // neutral startup position
+  writeServoUS(SERVO1_CH, 1500);
+  writeServoUS(SERVO2_CH, 1500);
+  writeServoUS(SERVO3_CH, 1500);
+  writeServoUS(SERVO4_CH, 1500);
+
+  calibratePQInputs();
+}
+
+// =====================================================
+// Main loop
+// =====================================================
+
+void loop() {
+
+  unsigned long now = millis();
+
+  bool btn12Reading = digitalRead(btn12);
+  bool btn13Reading = digitalRead(btn13);
+
+  // ----- button 12: press start -----
+  if (btn12Reading == LOW && lastBtn12Reading == HIGH) {
+    btn12PressTime = now;
+    btn12LongPressHandled = false;
+  }
+
+  // ----- button 12: held long enough -> delete (fires once, while still held) -----
+  if (btn12Reading == LOW && !btn12LongPressHandled &&
+      (now - btn12PressTime) >= longPressThreshold) {
+
+    deleteStoredPosition();
+    btn12LongPressHandled = true;
+    btn12WaitingForSecondClick = false; // cancel any pending click logic
+  }
+
+  // ----- button 12: release -----
+  if (btn12Reading == HIGH && lastBtn12Reading == LOW) {
+
+    if (!btn12LongPressHandled) {
+      // this was a short click
+      if (btn12WaitingForSecondClick) {
+        // second click arrived in time -> replay
+        playbackStoredPosition();
+        btn12WaitingForSecondClick = false;
+      } else {
+        // first click -> start waiting to see if a second one follows
+        btn12WaitingForSecondClick = true;
+        btn12FirstClickTime = now;
+      }
+    }
+  }
+
+  lastBtn12Reading = btn12Reading;
+
+  // ----- button 12: double-click window expired with no 2nd click -> record -----
+  if (btn12WaitingForSecondClick &&
+      (now - btn12FirstClickTime) > doubleClickWindow) {
+
+    recordCurrentPosition();
+    btn12WaitingForSecondClick = false;
+  }
+
+  // ----- button 13: toggle wrist direction -----
+  if (btn13Reading == LOW && lastBtn13Reading == HIGH) {
+    wristDirectionReversed = !wristDirectionReversed;
+    Serial.print("Wrist direction reversed: ");
+    Serial.println(wristDirectionReversed ? "true" : "false");
+  }
+
+  lastBtn13Reading = btn13Reading;
+
+  // teleoperation mode (fingers)
+  if (!playbackActive) {
+    updateServosFromInputs();
+  }
+
+  // wrist stepper, driven by KY-023 SW pin + btn13 direction toggle
+  updateWristStepper();
+
+  delay(20);
+}

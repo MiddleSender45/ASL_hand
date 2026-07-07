@@ -9,7 +9,7 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
 
 const int SERVO1_CH = 3;   // pointer
 const int SERVO2_CH = 1;   // ring
-const int SERVO3_CH = 2;   // middlel
+const int SERVO3_CH = 2;   // middle
 const int SERVO4_CH = 0;   // pinky
 
 const int SERVO_MIN_US = 1000;
@@ -208,6 +208,37 @@ bool signLetter(char c)
     return false;
 }
 
+// =====================================================
+// PERIOD ANIMATION
+// =====================================================
+
+void periodAnimation()
+{
+    Serial.println("[period] standing wave");
+
+    const int OPEN  = 2000;
+    const int CLOSED = 1000;
+
+    const unsigned long STEP = 60;
+    const int CYCLES = 4;
+
+    for(int i = 0; i < CYCLES; i++)
+    {
+        // phase 1: index+middle up, ring+pinky down
+        moveToPose(OPEN, CLOSED, OPEN, CLOSED, STEP);
+
+        // phase 2: invert (standing wave flip)
+        moveToPose(CLOSED, OPEN, CLOSED, OPEN, STEP);
+    }
+
+    // settle neutral
+    moveToPose(1500,1500,1500,1500,80);
+}
+
+// =====================================================
+// WORD SPACE ANIMATION
+// =====================================================
+
 void wordSpaceAnimation()
 {
     Serial.println("[new word]");
@@ -262,9 +293,12 @@ void signPhrase(String phrase)
 
         if(c == ' ')
         {
-            Serial.println("[space]");\
+            Serial.println("[space]");
             wordSpaceAnimation();
-            // delay(WORD_PAUSE_TIME);
+        }
+        else if(c == '.')
+        {
+            periodAnimation();
         }
         else
         {
