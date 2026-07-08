@@ -11,7 +11,7 @@ This repository contains the software and hardware control infrastructure requir
 [sign-language-interpreter repository](https://github.com/MiddleSender45/sign-language-interpreter.git?utm_source=chatgpt.com)
 
 
-<img width="3213" height="5712" alt="IMG_9224 (1)" src="https://github.com/user-attachments/assets/0376661b-2455-4627-8e88-a6f768659e68" />
+<img width="3213" height="5712" alt="IMG_9252" src="https://github.com/user-attachments/assets/3a847cdc-548b-41f0-b471-fcbef006c87e" />
 
 
 ---
