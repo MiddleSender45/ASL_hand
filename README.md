@@ -29,38 +29,6 @@ PLEASE NOTE: Hand build files are proprietary and are not included in this repos
 
 ---
 
-## Hardware Requirements
-
-### Actuation
-
-* 4 × PQ12 linear actuators *(or any PWM-compatible servo motors)*
-
-### Control Electronics
-
-* 1 × Arduino-compatible microcontroller
-* 1 × PCA9685 PWM controller board
-
-### Sensors
-
-* 4 × Flex resistors
-* 4 × 10kΩ (or greater) resistors
-
-### User Interface
-
-* 2 × Push buttons
-
-### Power
-
-* External power supply appropriate for the selected actuators
-
-### Miscellaneous
-
-* Breadboard
-* Jumper wires
-* Optional 3D-printed hand components
-
----
-
 ## System Architecture
 
 The complete ASL communication pipeline consists of two major components:
