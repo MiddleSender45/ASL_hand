@@ -113,6 +113,7 @@ Planned improvements include:
 * Improved finger trajectory interpolation
 * Additional degrees of freedom
 * Bidirectional conversational interfaces
+* Two degree of freedom wrist action
 * Expanded accessibility features
 
 ---
@@ -122,6 +123,19 @@ Planned improvements include:
 Communication accessibility remains an underexplored area of artificial intelligence. By combining computer vision, robotics, and large language models, this project aims to create a platform where sign language users can interact with AI systems using their native mode of communication.
 
 This project is open-source to encourage collaboration, experimentation, and further development of accessible human-AI interfaces.
+
+---
+
+## AI Usage
+
+AI was used to generate portions of teleoperation code, which was then reviewed modified and tested by myself before integrating into codebase. AI was also used in formatting comments consistently. AI models were used to carry conversations with users, reponding to the hand, however that application was not a part of development, only application.
+
+---
+
+## Acknowledgements
+
+Alt-Bionics - Provided hand used development
+[Laplaces42](https://github.com/MiddleSender45/sign-language-interpreter.git) - Provided sign-language interpreting model framework
 
 ---
 
