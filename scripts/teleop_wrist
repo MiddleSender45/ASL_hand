@@ -41,10 +41,10 @@ const float ADC_TO_V = 5.0 / 1023.0;
 
 // ================= wrist stepper (KY-023 + stepper driver) =================
 
-const int STEP_PIN = 4;
-const int DIR_PIN  = 3;
-const int EN_PIN   = 2;   // active LOW enable
-const int SW_PIN   = 9;   // KY-023 joystick button (SW), INPUT_PULLUP, active LOW
+const int STEP_PIN = 10;
+const int DIR_PIN  = 9;
+const int EN_PIN   = 11;   // active LOW enable
+const int SW_PIN   = 8;   // KY-023 joystick button (SW), INPUT_PULLUP, active LOW
 
 const unsigned long STEP_DELAY_US = 1500; // constant wrist speed
 
@@ -449,9 +449,7 @@ void loop() {
   lastBtn12Reading = btn12Reading;
 
   // ----- button 12: double-click window expired with no 2nd click -> record -----
-  if (btn12WaitingForSecondClick &&
-      (now - btn12FirstClickTime) > doubleClickWindow) {
-
+  if (btn12WaitingForSecondClick && (now - btn12FirstClickTime) > doubleClickWindow) {
     recordCurrentPosition();
     btn12WaitingForSecondClick = false;
   }
