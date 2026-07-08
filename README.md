@@ -104,9 +104,9 @@ AI was used to generate portions of teleoperation code, which was then reviewed 
 
 ## Acknowledgements
 
-Alt-Bionics - Provided hand used development
+Alt-Bionics - Provided hand used in development
 
-[Laplaces42](https://github.com/MiddleSender45/sign-language-interpreter.git) - Provided sign-language interpreting model framework
+[Laplaces42](https://github.com/MiddleSender45/sign-language-interpreter.git) - Provided sign-language interpreting framework
 
 ---
 
