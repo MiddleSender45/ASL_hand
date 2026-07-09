@@ -21,8 +21,8 @@ const int SERVO_MAX_US = 2000;
 
 bool ENABLE_TRANSITIONS = true;
 
-const unsigned long TRANSITION_TIME  = 300;   // ms
-const unsigned long LETTER_HOLD_TIME = 800;   // ms
+const unsigned long TRANSITION_TIME  = 800;   // ms
+const unsigned long LETTER_HOLD_TIME = 1000;   // ms
 
 // wave timing
 const unsigned long SPACE_STEP_TIME  = 80;
@@ -37,6 +37,21 @@ int currentP2 = 1500;
 int currentP3 = 1500;
 int currentP4 = 1500;
 
+// ================= Wrist Stepper =================
+
+const int STEP_PIN = 10;
+const int DIR_PIN  = 9;
+const int EN_PIN   = 11;
+
+long currentWrist = 0;
+
+// acceleration profile
+const int START_DELAY_US  = 3000;
+const int CRUISE_DELAY_US = 1200;
+const int END_DELAY_US    = 3000;
+
+const int ACCEL_STEPS = 150;
+
 // =====================================================
 // ALPHABET DATABASE
 // =====================================================
@@ -48,44 +63,41 @@ struct LetterPose
     int p2;
     int p3;
     int p4;
+    long wrist;
 };
 
 LetterPose alphabet[] =
 {
-    {'A',2000,2000,2000,2000},
-    {'B',1000,1000,1000,1000},
-    {'C',1766,1677,1731,1694},
-    {'D',1000,2000,2000,2000},
-    {'E',2000,2000,2000,2000},
-    {'F',1871,1000,1000,1000},
-    {'G',1616,2000,2000,2000},
-    {'H',1673,2000,1662,2000},
-    {'I',2000,2000,2000,1000},
+    {'A',2000,2000,2000,2000,   0},
+    {'B',1000,1000,1000,1000,   0},
+    {'C',1766,1677,1731,1694, 200},
+    {'D',1000,2000,2000,2000,   0},
+    {'E',2000,2000,2000,2000,   0},
+    {'F',1871,1000,1000,1000,   0},
+    {'G',1616,2000,2000,2000,-200},
+    {'H',1673,2000,1662,2000,-200},
+    {'I',2000,2000,2000,1000,   0},
 
-    // J unavailable
+    {'K',1000,2000,1000,2000,   0},
+    {'L',1000,2000,2000,2000,   0},
 
-    {'K',1000,2000,1000,2000},
-    {'L',1000,2000,2000,2000},
+    {'M',2000,2000,2000,2000,   0},
+    {'N',1850,2000,1850,2000,   0},
 
-    {'M',2000,2000,2000,2000},
-    {'N',1850,2000,1850,2000},
+    {'O',1500,1500,1500,1500,-200},
+    {'P',1590,2000,1760,2000,-200},
+    {'Q',1815,2000,2000,2000,   0},
 
-    {'O',1500,1500,1500,1500},
-    {'P',1590,2000,1760,2000},
-    {'Q',1815,2000,2000,2000},
+    {'R',1400,2000,1000,2000,   0},
+    {'S',2000,2000,2000,2000,   0},
+    {'T',1888,2000,1888,2000,   0},
 
-    {'R',1400,2000,1000,2000},
-    {'S',2000,2000,2000,2000},
-    {'T',1888,2000,1888,2000},
+    {'U',1000,2000,1000,2000,   0},
+    {'V',1000,2000,1000,2000,   0},
+    {'W',1000,1000,1000,2000,   0},
 
-    {'U',1000,2000,1000,2000},
-    {'V',1000,2000,1000,2000},
-    {'W',1000,1000,1000,2000},
-
-    {'X',1570,2000,1858,2000},
-    {'Y',2000,2000,2000,1000}
-
-    // Z unavailable
+    {'X',1570,2000,1858,2000,-163},
+    {'Y',2000,2000,2000,1000,   0}
 };
 
 const int NUM_LETTERS =
@@ -120,58 +132,102 @@ void moveToPose(
     int targetP2,
     int targetP3,
     int targetP4,
+    long targetWrist,
     unsigned long moveTime)
 {
-    if(!ENABLE_TRANSITIONS)
-    {
-        writeServoUS(SERVO1_CH,targetP1);
-        writeServoUS(SERVO2_CH,targetP2);
-        writeServoUS(SERVO3_CH,targetP3);
-        writeServoUS(SERVO4_CH,targetP4);
-
-        currentP1 = targetP1;
-        currentP2 = targetP2;
-        currentP3 = targetP3;
-        currentP4 = targetP4;
-
-        return;
-    }
-
-    const int STEPS = 25;
+    const int SERVO_STEPS = 100;
 
     int startP1 = currentP1;
     int startP2 = currentP2;
     int startP3 = currentP3;
     int startP4 = currentP4;
 
-    for(int i=1;i<=STEPS;i++)
+    long wristDistance = targetWrist - currentWrist;
+    long wristMoved = 0;
+
+    digitalWrite(EN_PIN,LOW);
+
+    if(wristDistance >= 0)
+        digitalWrite(DIR_PIN,HIGH);
+    else
+        digitalWrite(DIR_PIN,LOW);
+
+    long wristSteps = abs(wristDistance);
+
+    for(int i=1;i<=SERVO_STEPS;i++)
     {
-        float t = (float)i/STEPS;
+        // normalized progress
+        float t = (float)i / SERVO_STEPS;
 
-        int p1 = startP1 +
-                 (targetP1-startP1)*t;
+        // cubic smoothstep (ease in/ease out)
+        float t = (float)i / SERVO_STEPS;
 
-        int p2 = startP2 +
-                 (targetP2-startP2)*t;
+        float s = t*t*t*(t*(6.0*t - 15.0) + 10.0);
 
-        int p3 = startP3 +
-                 (targetP3-startP3)*t;
-
-        int p4 = startP4 +
-                 (targetP4-startP4)*t;
+        int p1 = startP1 + (targetP1 - startP1) * s;
+        int p2 = startP2 + (targetP2 - startP2) * s;
+        int p3 = startP3 + (targetP3 - startP3) * s;
+        int p4 = startP4 + (targetP4 - startP4) * s;
 
         writeServoUS(SERVO1_CH,p1);
         writeServoUS(SERVO2_CH,p2);
         writeServoUS(SERVO3_CH,p3);
         writeServoUS(SERVO4_CH,p4);
 
-        delay(moveTime/STEPS);
+        long desired = (long)(wristSteps * s);
+
+        while(wristMoved<desired)
+        {
+            int delayUS;
+
+            if(wristSteps<2*ACCEL_STEPS)
+            {
+                float x=(float)wristMoved/max((long)1,wristSteps);
+
+                if(x<0.5)
+                    delayUS=START_DELAY_US-(START_DELAY_US-CRUISE_DELAY_US)*(x*2.0);
+                else
+                    delayUS=CRUISE_DELAY_US+(END_DELAY_US-CRUISE_DELAY_US)*((x-0.5)*2.0);
+            }
+            else
+            {
+                if(wristMoved<ACCEL_STEPS)
+                {
+                    float s=(float)wristMoved/ACCEL_STEPS;
+                    delayUS=START_DELAY_US-(START_DELAY_US-CRUISE_DELAY_US)*s;
+                }
+                else if(wristMoved>wristSteps-ACCEL_STEPS)
+                {
+                    float s=(float)(wristMoved-(wristSteps-ACCEL_STEPS))/ACCEL_STEPS;
+                    delayUS=CRUISE_DELAY_US+(END_DELAY_US-CRUISE_DELAY_US)*s;
+                }
+                else
+                    delayUS=CRUISE_DELAY_US;
+            }
+
+            digitalWrite(STEP_PIN,HIGH);
+            delayMicroseconds(4);
+            digitalWrite(STEP_PIN,LOW);
+
+            delayMicroseconds(delayUS);
+
+            wristMoved++;
+
+            if(wristDistance>=0)
+                currentWrist++;
+            else
+                currentWrist--;
+        }
+
+        delay(moveTime/SERVO_STEPS);
     }
 
-    currentP1 = targetP1;
-    currentP2 = targetP2;
-    currentP3 = targetP3;
-    currentP4 = targetP4;
+    digitalWrite(EN_PIN,HIGH);
+
+    currentP1=targetP1;
+    currentP2=targetP2;
+    currentP3=targetP3;
+    currentP4=targetP4;
 }
 
 // =====================================================
@@ -194,8 +250,8 @@ bool signLetter(char c)
                 alphabet[i].p2,
                 alphabet[i].p3,
                 alphabet[i].p4,
+                alphabet[i].wrist,
                 TRANSITION_TIME);
-
             delay(LETTER_HOLD_TIME);
 
             return true;
@@ -225,14 +281,14 @@ void periodAnimation()
     for(int i = 0; i < CYCLES; i++)
     {
         // phase 1: index+middle up, ring+pinky down
-        moveToPose(OPEN, CLOSED, OPEN, CLOSED, STEP);
+        moveToPose(OPEN, CLOSED, OPEN, CLOSED, 0, STEP);
 
         // phase 2: invert (standing wave flip)
-        moveToPose(CLOSED, OPEN, CLOSED, OPEN, STEP);
+        moveToPose(CLOSED, OPEN, CLOSED, OPEN, 0, STEP);
     }
 
     // settle neutral
-    moveToPose(1500,1500,1500,1500,80);
+    moveToPose(1500,1500,1500,1500,0,80);
 }
 
 // =====================================================
@@ -249,27 +305,27 @@ void wordSpaceAnimation()
     const unsigned long WAVE = 70;
 
     // pointer
-    moveToPose(C,O,O,O,WAVE);
+    moveToPose(C,O,O,O,0,WAVE);
 
     // pointer + middle
-    moveToPose(C,O,C,O,WAVE);
+    moveToPose(C,O,C,O,0,WAVE);
 
     // middle + ring
-    moveToPose(O,C,C,O,WAVE);
+    moveToPose(O,C,C,O,0,WAVE);
 
     // ring + pinky
-    moveToPose(O,C,O,C,WAVE);
+    moveToPose(O,C,O,C,0,WAVE);
 
     // pinky
-    moveToPose(O,O,O,C,WAVE);
+    moveToPose(O,O,O,C,0,WAVE);
 
     // reverse
-    moveToPose(O,C,O,C,WAVE);
-    moveToPose(O,C,C,O,WAVE);
-    moveToPose(C,O,C,O,WAVE);
-    moveToPose(C,O,O,O,WAVE);
+    moveToPose(O,C,O,C,0,WAVE);
+    moveToPose(O,C,C,O,0,WAVE);
+    moveToPose(C,O,C,O,0,WAVE);
+    moveToPose(C,O,O,O,0,WAVE);
 
-    moveToPose(O,O,O,O,WAVE);
+    moveToPose(O,O,O,O,0,WAVE);
 
     delay(150);
 }
@@ -317,6 +373,13 @@ void signPhrase(String phrase)
 void setup()
 {
     Serial.begin(9600);
+
+    pinMode(STEP_PIN,OUTPUT);
+    pinMode(DIR_PIN,OUTPUT);
+    pinMode(EN_PIN,OUTPUT);
+
+    digitalWrite(EN_PIN,HIGH);
+    digitalWrite(STEP_PIN,LOW);
 
     Wire.begin();
 
